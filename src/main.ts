@@ -2,7 +2,8 @@ import { Plugin, WorkspaceLeaf } from 'obsidian';
 import { AccessService } from './services/access.service';
 import { AccessView, SBE_ACCESS_VIEW_TYPE } from './ui/access-view';
 import { AccessSettingsTab } from './ui/settings-tab';
-import { getService } from '../../sbe-core/src/bridge';
+import { getService, publishService, unpublishService } from '../../sbe-core/src/bridge';
+import type { SbeAccessApi } from '../../sbe-core/src/types';
 import { errorMessage } from '../../sbe-core/src/utils/errors';
 
 export interface SbeAccessSettings {
@@ -43,7 +44,24 @@ export default class SbeAccessPlugin extends Plugin {
     });
 
     this.addSettingTab(new AccessSettingsTab(this.app, this));
+
+    // Без этого ЦУП не может открыть плагин: он зовёт getService(id).open()
+    // по записи реестра (жалоба пользователя 2026-09-09 — консоль открывалась
+    // только своей вьюхой, из ЦУП кнопка не работала).
+    publishService<SbeAccessApi>('sbe-access', {
+      open: async () => {
+        await this.activateView();
+      },
+    }, {
+      version: this.manifest.version,
+      name: this.manifest.name,
+    });
+
     void this.announceOnce();
+  }
+
+  onunload(): void {
+    unpublishService('sbe-access');
   }
 
   async activateView(): Promise<void> {

@@ -138,12 +138,23 @@ export class AccessView extends ItemView {
       return;
     }
     for (const u of users) {
-      const row = list.createEl('button', {
+      // Именно div, а не button: у кнопки Obsidian свои стили (фиксированная
+      // высота, центрирование, обрезка содержимого) — из-за них в строке
+      // оставалась видна только дата, а адрес пропадал (жалоба 2026-09-09).
+      const row = list.createDiv({
         cls: `tn-access-user${this.state.selected === u.email ? ' active' : ''}`,
+        attr: { role: 'button', tabindex: '0', title: u.email },
       });
-      row.createSpan({ cls: 'tn-access-user-email', text: u.email });
-      row.createSpan({ cls: 'tn-access-user-seen', text: formatSeen(u.last_seen_at) });
-      row.addEventListener('click', () => void this.selectUser(u.email));
+      row.createDiv({ cls: 'tn-access-user-email', text: u.email || '(адрес не указан)' });
+      row.createDiv({ cls: 'tn-access-user-seen', text: formatSeen(u.last_seen_at) });
+      const open = (): void => void this.selectUser(u.email);
+      row.addEventListener('click', open);
+      row.addEventListener('keydown', (ev: KeyboardEvent) => {
+        if (ev.key === 'Enter' || ev.key === ' ') {
+          ev.preventDefault();
+          open();
+        }
+      });
     }
   }
 
