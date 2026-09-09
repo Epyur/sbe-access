@@ -1,0 +1,128 @@
+/* LogicTEAM.Доступы — фасад: топбар, список людей слева, карточка справа.
+   Классы с префиксом tn-*, цвета — из токенов sbe-core. */
+
+.tn-access-view {
+  padding: 0;
+}
+
+.tn-access-topbar {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 10px 16px;
+  border-bottom: 1px solid var(--tn-border);
+}
+
+.tn-access-title {
+  font-weight: 600;
+  font-size: 15px;
+}
+
+.tn-access-body {
+  display: flex;
+  align-items: stretch;
+  min-height: 0;
+}
+
+.tn-access-side {
+  width: 280px;
+  flex: 0 0 280px;
+  border-right: 1px solid var(--tn-border);
+  padding: 12px;
+  overflow-y: auto;
+}
+
+.tn-access-users {
+  margin-top: 10px;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.tn-access-count {
+  font-size: 12px;
+  color: var(--tn-muted);
+  margin-bottom: 6px;
+}
+
+.tn-access-user {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 2px;
+  width: 100%;
+  padding: 6px 8px;
+  border: none;
+  border-radius: var(--tn-radius);
+  background: none;
+  cursor: pointer;
+  text-align: left;
+}
+
+.tn-access-user:hover {
+  background: var(--tn-bg);
+}
+
+.tn-access-user.active {
+  background: var(--tn-brand);
+  color: #fff;
+}
+
+.tn-access-user-email {
+  font-size: 13px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  max-width: 100%;
+}
+
+.tn-access-user-seen {
+  font-size: 11px;
+  opacity: 0.7;
+}
+
+.tn-access-card {
+  flex: 1;
+  padding: 16px 20px;
+  overflow-y: auto;
+}
+
+.tn-access-card-title {
+  margin: 0 0 12px;
+  font-size: 17px;
+}
+
+.tn-access-row {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 8px 0;
+  border-bottom: 1px solid var(--tn-border);
+}
+
+.tn-access-app {
+  flex: 0 0 220px;
+  font-size: 14px;
+}
+
+.tn-access-note {
+  font-size: 12px;
+  color: var(--tn-muted);
+}
+
+.tn-access-hint {
+  font-size: 13px;
+  color: var(--tn-muted);
+  padding: 12px 16px;
+  line-height: 1.5;
+}
+
+.tn-access-error {
+  margin: 12px 16px;
+  border: 1px solid var(--tn-err);
+  padding: 10px 12px;
+  border-radius: var(--tn-radius);
+  background: var(--tn-card);
+  color: var(--tn-err);
+  font-size: 13px;
+}

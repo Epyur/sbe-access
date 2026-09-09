@@ -1,0 +1,9 @@
+{
+  "id": "sbe-access",
+  "name": "LogicTEAM.Доступы",
+  "version": "0.1.0",
+  "minAppVersion": "1.11.4",
+  "description": "Централизованная настройка доступов: список всех, кто входил в систему, и роли человека в тех приложениях, где вы администратор.",
+  "author": "Полищук Евгений (polishchuk@tn.ru)",
+  "isDesktopOnly": true
+}
