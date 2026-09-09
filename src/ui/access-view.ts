@@ -1,8 +1,10 @@
 import { ItemView, Notice, WorkspaceLeaf } from 'obsidian';
 import type SbeAccessPlugin from '../main';
-import { assignableRoles, roleLabel } from '../services/access.service';
-import type { AccessRole, AccessUser } from '../types/access';
+import { assignableRoles, guestRoles, roleLabel } from '../services/access.service';
+import type { AccessApp, AccessInvite, AccessRequest, AccessRole, AccessUser } from '../types/access';
 import { errorMessage } from '../../../sbe-core/src/utils/errors';
+
+type AccessTab = 'people' | 'requests' | 'invites';
 
 export const SBE_ACCESS_VIEW_TYPE = 'sbe-access-view';
 
@@ -14,12 +16,15 @@ export class AccessView extends ItemView {
   private plugin: SbeAccessPlugin;
   private container!: HTMLElement;
   private state: {
+    tab: AccessTab;
     users: AccessUser[];
     search: string;
     selected: string | null;
     roles: AccessRole[];
+    apps: AccessApp[];
+    requests: AccessRequest[];
+    invites: AccessInvite[];
     globalAdmin: boolean;
-    appsCount: number;
     loading: boolean;
     error: string;
   };
@@ -28,8 +33,8 @@ export class AccessView extends ItemView {
     super(leaf);
     this.plugin = plugin;
     this.state = {
-      users: [], search: '', selected: null, roles: [],
-      globalAdmin: false, appsCount: 0, loading: true, error: '',
+      tab: 'people', users: [], search: '', selected: null, roles: [], apps: [],
+      requests: [], invites: [], globalAdmin: false, loading: true, error: '',
     };
   }
 
@@ -64,13 +69,22 @@ export class AccessView extends ItemView {
     try {
       const apps = await this.plugin.access.apps();
       this.state.globalAdmin = apps.global_admin;
-      this.state.appsCount = apps.apps.length;
+      this.state.apps = apps.apps;
       if (apps.apps.length === 0) {
         this.state.error = 'Вы не администратор ни одного приложения — настраивать нечего.';
         this.state.users = [];
         return;
       }
-      this.state.users = await this.plugin.access.users();
+      // Заявки грузим всегда: их число видно прямо на вкладке, иначе человек
+      // не узнает, что кто-то ждёт решения, пока не заглянет в раздел.
+      const [users, requests, invites] = await Promise.all([
+        this.plugin.access.users(),
+        this.plugin.access.requests(),
+        this.plugin.access.invites(),
+      ]);
+      this.state.users = users;
+      this.state.requests = requests;
+      this.state.invites = invites;
     } catch (e: unknown) {
       this.state.error = errorMessage(e);
     } finally {
@@ -107,9 +121,46 @@ export class AccessView extends ItemView {
       return;
     }
 
+    this.renderTabs();
+    if (this.state.tab === 'requests') {
+      this.renderRequests();
+      return;
+    }
+    if (this.state.tab === 'invites') {
+      this.renderInvites();
+      return;
+    }
     const body = this.container.createDiv({ cls: 'tn-access-body' });
     this.renderUsers(body);
     this.renderCard(body);
+  }
+
+  private renderTabs(): void {
+    const tabs = this.container.createDiv({ cls: 'tn-access-tabs' });
+    const pending = this.state.requests.length;
+    const items: Array<{ id: AccessTab; label: string }> = [
+      { id: 'people', label: 'Люди' },
+      { id: 'requests', label: pending > 0 ? `Запросы (${pending})` : 'Запросы' },
+      { id: 'invites', label: 'Внешние гости' },
+    ];
+    for (const it of items) {
+      const el = tabs.createDiv({
+        cls: `tn-access-tab${this.state.tab === it.id ? ' active' : ''}`,
+        text: it.label,
+        attr: { role: 'button', tabindex: '0' },
+      });
+      const go = (): void => {
+        this.state.tab = it.id;
+        this.render();
+      };
+      el.addEventListener('click', go);
+      el.addEventListener('keydown', (ev: KeyboardEvent) => {
+        if (ev.key === 'Enter' || ev.key === ' ') {
+          ev.preventDefault();
+          go();
+        }
+      });
+    }
   }
 
   private renderUsers(body: HTMLElement): void {
@@ -163,7 +214,7 @@ export class AccessView extends ItemView {
     if (!this.state.selected) {
       card.createDiv({
         cls: 'tn-access-hint',
-        text: `Выберите человека слева. Настроить можно ${this.state.appsCount} приложени${plural(this.state.appsCount)} — те, где вы администратор.`,
+        text: `Выберите человека слева. Настроить можно ${this.state.apps.length} приложени${plural(this.state.apps.length)} — те, где вы администратор.`,
       });
       return;
     }
@@ -190,6 +241,144 @@ export class AccessView extends ItemView {
         ? `без личной роли: ${roleLabel(r.common_access).toLowerCase()}`
         : 'без личной роли доступа нет';
       row.createSpan({ cls: 'tn-access-note', text: note });
+      if (r.expires_at) {
+        // Временная роль гостя: без пометки её не отличить от постоянной, и
+        // администратор удивится, когда доступ «сам пропадёт».
+        row.createSpan({ cls: 'tn-access-note', text: `временно, до ${formatDate(r.expires_at)}` });
+      }
+    }
+  }
+
+  /** Раздел «Запросы»: кто нажал «Запросить доступ» в плагине и ещё ждёт решения. */
+  private renderRequests(): void {
+    const card = this.container.createDiv({ cls: 'tn-access-card' });
+    if (this.state.requests.length === 0) {
+      card.createDiv({ cls: 'tn-access-hint', text: 'Незакрытых запросов нет.' });
+      return;
+    }
+    for (const req of this.state.requests) {
+      const row = card.createDiv({ cls: 'tn-access-row' });
+      const who = row.createDiv({ cls: 'tn-access-request-who' });
+      who.createDiv({ cls: 'tn-access-user-email', text: req.email });
+      who.createDiv({
+        cls: 'tn-access-user-seen',
+        text: `${req.app_name || req.app_id} · ${formatDate(req.created_at)}`,
+      });
+
+      const select = row.createEl('select', { cls: 'tn-doc-select' });
+      for (const opt of assignableRoles(this.state.globalAdmin)) {
+        if (opt.value === '') continue; // «нет роли» здесь бессмысленно — это отказ, для него своя кнопка
+        select.createEl('option', { value: opt.value, text: opt.label });
+      }
+      select.value = 'viewer';
+
+      const grant = row.createEl('button', { cls: 'tn-btn', text: 'Выдать' });
+      grant.addEventListener('click', () => void this.decide(req, select.value, row));
+      const decline = row.createEl('button', { cls: 'tn-btn tn-btn-ghost', text: 'Отклонить' });
+      decline.addEventListener('click', () => void this.decide(req, null, row));
+    }
+    const hint = this.container.createDiv({ cls: 'tn-access-hint' });
+    hint.setText('О решении заявитель узнаёт письмом — и когда доступ выдан, и когда отказано.');
+  }
+
+  private async decide(req: AccessRequest, role: string | null, row: HTMLElement): Promise<void> {
+    row.addClass('busy');
+    try {
+      await this.plugin.access.decideRequest(req.id, role);
+      this.state.requests = this.state.requests.filter(x => x.id !== req.id);
+      new Notice(role
+        ? `Доступы: ${req.email} — ${roleLabel(role).toLowerCase()} в «${req.app_name}»`
+        : `Доступы: запрос ${req.email} отклонён`);
+      if (role) this.state.users = await this.plugin.access.users();
+      this.render();
+    } catch (e: unknown) {
+      row.removeClass('busy');
+      new Notice(`Доступы: ${errorMessage(e)}`);
+    }
+  }
+
+  /** Раздел «Внешние гости»: выписать временный доступ и посмотреть выданные. */
+  private renderInvites(): void {
+    const card = this.container.createDiv({ cls: 'tn-access-card' });
+    card.createEl('h2', { cls: 'tn-access-card-title', text: 'Выписать доступ внешнему человеку' });
+
+    const form = card.createDiv({ cls: 'tn-access-invite-form' });
+    const email = form.createEl('input', {
+      cls: 'tn-doc-input',
+      attr: { type: 'email', placeholder: 'Адрес гостя' },
+    });
+    const app = form.createEl('select', { cls: 'tn-doc-select' });
+    for (const a of this.state.apps) app.createEl('option', { value: a.app_id, text: a.name });
+    const role = form.createEl('select', { cls: 'tn-doc-select' });
+    for (const opt of guestRoles()) role.createEl('option', { value: opt.value, text: opt.label });
+    const days = form.createEl('select', { cls: 'tn-doc-select' });
+    for (const d of [7, 14, 30, 90, 180, 365]) {
+      days.createEl('option', { value: String(d), text: `${d} дн.` });
+    }
+    days.value = '30';
+    const submit = form.createEl('button', { cls: 'tn-btn', text: 'Выписать и отправить ссылку' });
+    submit.addEventListener('click', () => {
+      void this.createInvite(email.value, app.value, role.value, Number(days.value), submit);
+    });
+    card.createDiv({
+      cls: 'tn-access-hint',
+      text: 'Гость получит письмо со ссылкой входа в веб-версию. По истечении срока'
+        + ' гаснут и роль, и сама возможность войти — отдельно отзывать не нужно.',
+    });
+
+    const list = this.container.createDiv({ cls: 'tn-access-card' });
+    list.createEl('h2', { cls: 'tn-access-card-title', text: 'Выданные' });
+    if (this.state.invites.length === 0) {
+      list.createDiv({ cls: 'tn-access-hint', text: 'Пока никому не выписывали.' });
+      return;
+    }
+    for (const inv of this.state.invites) {
+      const row = list.createDiv({ cls: 'tn-access-row' });
+      const who = row.createDiv({ cls: 'tn-access-request-who' });
+      who.createDiv({ cls: 'tn-access-user-email', text: inv.email });
+      who.createDiv({
+        cls: 'tn-access-user-seen',
+        text: `${inv.app_name || inv.app_id} · ${roleLabel(inv.role).toLowerCase()} · до ${formatDate(inv.expires_at)}`,
+      });
+      row.createSpan({ cls: 'tn-access-note', text: inv.state });
+      if (inv.state === 'активно' || inv.state === 'ждём первого входа') {
+        const revoke = row.createEl('button', { cls: 'tn-btn tn-btn-ghost', text: 'Отозвать' });
+        revoke.addEventListener('click', () => void this.revokeInvite(inv, revoke));
+      }
+    }
+  }
+
+  private async createInvite(
+    email: string, appId: string, role: string, days: number, button: HTMLButtonElement,
+  ): Promise<void> {
+    const address = email.trim().toLowerCase();
+    if (!address.includes('@')) {
+      new Notice('Доступы: укажите адрес гостя');
+      return;
+    }
+    button.disabled = true;
+    try {
+      await this.plugin.access.createInvite(appId, address, role, days);
+      this.state.invites = await this.plugin.access.invites();
+      new Notice(`Доступы: ссылка отправлена на ${address}`);
+      this.render();
+    } catch (e: unknown) {
+      new Notice(`Доступы: ${errorMessage(e)}`);
+    } finally {
+      button.disabled = false;
+    }
+  }
+
+  private async revokeInvite(inv: AccessInvite, button: HTMLButtonElement): Promise<void> {
+    button.disabled = true;
+    try {
+      await this.plugin.access.revokeInvite(inv.id);
+      this.state.invites = await this.plugin.access.invites();
+      new Notice(`Доступы: доступ ${inv.email} прекращён`);
+      this.render();
+    } catch (e: unknown) {
+      button.disabled = false;
+      new Notice(`Доступы: ${errorMessage(e)}`);
     }
   }
 
@@ -217,6 +406,12 @@ function plural(n: number): string {
   if (mod10 === 1 && mod100 !== 11) return 'е';
   if (mod10 >= 2 && mod10 <= 4 && (mod100 < 12 || mod100 > 14)) return 'я';
   return 'й';
+}
+
+function formatDate(iso: string): string {
+  const d = new Date(iso);
+  if (Number.isNaN(d.getTime())) return iso;
+  return d.toLocaleDateString('ru-RU');
 }
 
 function formatSeen(iso: string | null): string {

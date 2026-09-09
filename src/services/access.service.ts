@@ -1,7 +1,9 @@
 import { requestUrl, RequestUrlParam } from 'obsidian';
 import { getService } from '../../../sbe-core/src/bridge';
 import { errorMessage } from '../../../sbe-core/src/utils/errors';
-import type { AccessApp, AccessAppsResponse, AccessRole, AccessUser } from '../types/access';
+import type {
+  AccessApp, AccessAppsResponse, AccessInvite, AccessRequest, AccessRole, AccessUser,
+} from '../types/access';
 
 /** Клиент консоли доступов. Ходит в auth-service с JWT приложения `access`
  * (выдаёт ЦУП, как любому плагину) — ключ устройства плагину недоступен,
@@ -49,12 +51,43 @@ export class AccessService {
 
   /** Назначить или отозвать (role='') роль человека в приложении. */
   async setRole(appId: string, email: string, role: string): Promise<void> {
+    await this.post('/auth/access/permissions', { app_id: appId, email, role });
+  }
+
+  /** Незакрытые заявки на доступ по приложениям администратора. */
+  async requests(): Promise<AccessRequest[]> {
+    const data = await this.get<{ requests?: AccessRequest[] }>('/auth/access/requests');
+    return Array.isArray(data.requests) ? data.requests : [];
+  }
+
+  /** Решение по заявке: роль выдаётся сразу, `null` — отклонить. Заявителю уходит письмо. */
+  async decideRequest(id: number, role: string | null): Promise<void> {
+    await this.post(`/auth/access/requests/${id}`, role === null ? { decline: true } : { role });
+  }
+
+  /** Выданные приглашения внешним по приложениям администратора. */
+  async invites(): Promise<AccessInvite[]> {
+    const data = await this.get<{ invites?: AccessInvite[] }>('/auth/access/invites');
+    return Array.isArray(data.invites) ? data.invites : [];
+  }
+
+  /** Выписать гостю временный доступ; ссылку входа сервер отправляет ему письмом. */
+  async createInvite(appId: string, email: string, role: string, days: number): Promise<void> {
+    await this.post('/auth/access/invites', { app_id: appId, email, role, days });
+  }
+
+  /** Досрочно погасить приглашение: роль снимается, сессии гостя обрываются. */
+  async revokeInvite(id: number): Promise<void> {
+    await this.post(`/auth/access/invites/${id}/revoke`, {});
+  }
+
+  private async post(path: string, body: Record<string, unknown>): Promise<void> {
     const token = await this.getToken();
     const res = await this.request({
-      url: `${this.baseUrl}/auth/access/permissions`,
+      url: `${this.baseUrl}${path}`,
       method: 'POST',
       headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
-      body: JSON.stringify({ app_id: appId, email, role }),
+      body: JSON.stringify(body),
     });
     this.assertOk(res);
   }
@@ -136,4 +169,14 @@ export function assignableRoles(globalAdmin: boolean): Array<{ value: string; la
   return roles;
 }
 
-export type { AccessApp, AccessRole, AccessUser };
+/** Роли, доступные гостю: администратора внешнему человеку не выдают — это
+ *  временный доступ к данным, а не к управлению правами (проверяет и сервер). */
+export function guestRoles(): Array<{ value: string; label: string }> {
+  return [
+    { value: 'viewer', label: 'Просмотр' },
+    { value: 'commenter', label: 'Просмотр и комментарии' },
+    { value: 'editor', label: 'Редактирование' },
+  ];
+}
+
+export type { AccessApp, AccessInvite, AccessRequest, AccessRole, AccessUser };
